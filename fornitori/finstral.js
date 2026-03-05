@@ -144,11 +144,14 @@ const FINSTRAL_CHECKER = (() => {
         colEst = mCol[1];
       }
 
-      // Colore interno
+      // Colore interno — può essere numerico (45) o codice (L14)
+      // Prendo l'ultimo match nel chunk (come per colore esterno)
       let colInt = '';
-      const reColInt = /Col\.\s*int\.\s+([\d]+)/gi;
-      const mColInt = reColInt.exec(chunk);
-      if (mColInt) colInt = mColInt[1];
+      const reColInt = /Col\.\s*int\.\s+(L?\d+)/gi;
+      let mColInt;
+      while ((mColInt = reColInt.exec(chunk)) !== null) {
+        colInt = mColInt[1];
+      }
 
       // Soglia 377K — presente solo nelle PF, sul lato BASSO
       // La finestra (F) ha telaio circolare, NON ha soglia
@@ -210,6 +213,7 @@ const FINSTRAL_CHECKER = (() => {
       anta:       'Tipo anta',
       vetro:      'Vetro',
       ferr:       'Ferramenta',
+      colInt:     'Colore int.',
       colEst:     'Colore est.',
       soglia:     'Soglia',
     },
