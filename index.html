@@ -407,7 +407,7 @@ function renderOutput(risultati, pdfExtra, metadati) {
       <th>Esito</th><th>Pos.</th><th>Ambiente</th>
       <th>BRM L×H</th><th>Tipo</th><th>Lato</th>
       <th>${col.telaio}</th><th>${col.anta}</th><th>${col.vetro}</th>
-      <th>${col.ferr}</th><th>${col.colEst}</th><th>${col.soglia}</th>
+      <th>${col.ferr}</th><th>${col.colInt}</th><th>${col.colEst}</th><th>${col.soglia}</th>
     </tr></thead><tbody>`;
 
   for (const r of risultati) {
@@ -455,6 +455,7 @@ function renderOutput(risultati, pdfExtra, metadati) {
       <td>${cellCmp(j.anta_norm, p.anta, p.anta?.includes(j.anta_norm), 'warn')}</td>
       <td>${cellCmp(j.vetro_norm, p.vetro, j.vetro_norm===p.vetro, 'err')}</td>
       <td>${cellCmp(j.ferr_norm, p.ferr, j.ferr_norm===p.ferr, 'warn')}</td>
+      <td>${cellCmp(j.coloreInt, p.colInt, j.coloreInt===p.colInt, 'warn')}</td>
       <td>${cellCmp(j.coloreEst, p.colEst, j.coloreEst===p.colEst, 'err')}</td>
       <td>${sogliaCella}</td>
     </tr>`;
