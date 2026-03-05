@@ -1,204 +1,491 @@
-/**
- * O.P.E.R.A. — Checker Core v1.0
- * Logica di confronto comune a tutti i fornitori.
- * Non contiene nulla di specifico per Finstral, Palagina, ecc.
- */
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>O.P.E.R.A. — Controllo Ordini Fornitori</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
 
-const OPERA_CHECKER = (() => {
-
-  // ── Mappature JSON rilievo ──────────────────────────────────────────────────
-
-  const LATO_MAP = {
-    '-1': 'Din 1', '-2': 'Din 2',
-     '1': 'Din 1',  '2': 'Din 2',
-  };
-
-  // ── Parse JSON progetto ─────────────────────────────────────────────────────
-
-  function parseProgetto(data) {
-    const positions = data.positions || [];
-    return positions.map((p, idx) => {
-      const inf = p.infisso || {};
-      const tipoApertura = p.tipoApertura || inf.tipoInfissoAssociato || '';
-
-      // Colori: "L14 - Mogano verniciato" → "L14"
-      const coloreEst = (inf.coloreEst || '').split(' - ')[0].trim();
-      const coloreInt = (inf.coloreInt || '').split(' - ')[0].trim();
-
-      // Maniglia: "712 - A PRESSIONE" → "712"
-      const maniglia = (inf.maniglia || '').split(' - ')[0].trim();
-
-      return {
-        posNum:        idx + 1,
-        nome:          p.name || `Pos. ${idx + 1}`,
-        ambiente:      (p.ambiente || '').trim(),
-        tipo:          tipoApertura,           // 'F', 'PF', 'SC', ecc.
-        quantita:      parseInt(p.quantita || 1),
-        brmL:          parseInt(inf.BRM_L || 0),
-        brmH:          parseInt(inf.BRM_H || 0),
-        lato:          normLato(inf.lato1),    // 'Din 1' / 'Din 2'
-        telaio:        inf.telaio || '',
-        tipoAnta:      inf.tipoAnta || '',
-        vetro:         inf.vetro || '',
-        ferramenta:    inf.ferramenta1 || '',
-        coloreEst,
-        coloreInt,
-        maniglia,
-        coloreManiglia: inf.coloreManiglia || '',
-        tagli:         inf.codTagliValues || [],
-        codModello:    inf.codiceModello || '',
-        // PF = porta finestra → ha soglia sotto, 3 lati telaio (dx/alto/sx)
-        // F  = finestra       → telaio circolare 4 lati uguali
-        isPF:          tipoApertura === 'PF',
-        hasDati:       !!(parseInt(inf.BRM_L) && parseInt(inf.BRM_H)),
-      };
-    });
+  :root {
+    --bg:      #0f1117;
+    --surf:    #181c26;
+    --surf2:   #1e2333;
+    --border:  #2a3045;
+    --accent:  #4fc3f7;
+    --green:   #4caf7d;
+    --yellow:  #f4c842;
+    --red:     #f44336;
+    --gray:    #8892a4;
+    --white:   #e8edf5;
   }
 
-  function normLato(s) {
-    return LATO_MAP[String(s)] || s || '';
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--white);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
   }
 
-  // ── Confronto generico ──────────────────────────────────────────────────────
-  // Ogni fornitore chiama questa funzione passando i propri dati già normalizzati
-  // sotto forma di oggetto { brmL, brmH, tipo, lato, telaio, anta, vetro,
-  //                          ferr, colEst, colInt, hasSoglia, ... }
+  /* ── Header ── */
+  header {
+    background: var(--surf);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .logo { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--accent); letter-spacing: 3px; }
+  .htitle { font-size: 14px; font-weight: 500; }
+  .sep { color: var(--border); }
 
-  function confronta(jsonPos, pdfEl) {
-    const anomalie = [];
-    const dettagli = {};
+  /* ── Layout ── */
+  main { padding: 24px; max-width: 1400px; margin: 0 auto; }
 
-    function check(campo, vJ, vP, sev = 'err', tolleranza = 0) {
-      dettagli[campo] = { json: vJ, pdf: vP };
-      if (!vJ || !vP) return; // uno dei due mancante → non segnala
-      const uguali = tolleranza > 0
-        ? Math.abs(Number(vJ) - Number(vP)) <= tolleranza
-        : String(vJ).trim() === String(vP).trim();
-      if (!uguali) {
-        const diff = tolleranza > 0
-          ? `${Number(vJ) - Number(vP) > 0 ? '+' : ''}${Number(vJ) - Number(vP)}mm`
-          : null;
-        anomalie.push({ campo, json: vJ, pdf: vP, diff, sev });
-      }
+  /* ── Selezione fornitore ── */
+  .fornitore-bar {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .btn-forn {
+    padding: 8px 18px;
+    background: var(--surf);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--gray);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .btn-forn:hover { border-color: var(--accent); color: var(--white); }
+  .btn-forn.active { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+  .btn-forn.disabled { opacity: .35; cursor: not-allowed; }
+  .btn-forn.disabled:hover { border-color: var(--border); color: var(--gray); }
+
+  /* ── Upload ── */
+  .upload-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+
+  .upload-card {
+    background: var(--surf);
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 22px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+    position: relative;
+  }
+  .upload-card:hover { border-color: var(--accent); background: var(--surf2); }
+  .upload-card.loaded { border-color: var(--green); border-style: solid; }
+  .upload-card input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+  .upload-icon { font-size: 26px; margin-bottom: 6px; }
+  .upload-sub  { font-size: 11px; color: var(--gray); margin-top: 3px; }
+  .upload-name { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--green); margin-top: 6px; min-height: 16px; }
+
+  /* ── Bottone avvia ── */
+  .btn-check {
+    display: block; width: 100%; padding: 13px;
+    background: var(--accent); color: #000;
+    border: none; border-radius: 6px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 600; letter-spacing: 1px;
+    cursor: pointer; transition: opacity .2s; margin-bottom: 22px;
+  }
+  .btn-check:hover { opacity: .85; }
+  .btn-check:disabled { opacity: .3; cursor: not-allowed; }
+
+  /* ── Metadati ordine ── */
+  .meta-bar {
+    background: var(--surf);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-bottom: 18px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+  }
+  .meta-item label { font-size: 10px; color: var(--gray); text-transform: uppercase; letter-spacing: 1px; display: block; }
+  .meta-item span  { font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
+
+  /* ── Summary ── */
+  .summary-bar { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 18px; }
+  .summary-card { background: var(--surf); border: 1px solid var(--border); border-radius: 8px; padding: 14px; text-align: center; }
+  .summary-num  { font-size: 26px; font-weight: 600; font-family: 'IBM Plex Mono', monospace; }
+  .summary-lbl  { font-size: 10px; color: var(--gray); margin-top: 3px; text-transform: uppercase; letter-spacing: 1px; }
+  .num-green { color: var(--green); }
+  .num-yellow { color: var(--yellow); }
+  .num-red   { color: var(--red); }
+  .num-gray  { color: var(--gray); }
+
+  /* ── Anomalie ── */
+  .anomalie-box { background: var(--surf); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 18px; overflow: hidden; }
+  .sec-hdr { padding: 8px 14px; background: var(--surf2); border-bottom: 1px solid var(--border); font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--accent); letter-spacing: 1px; text-transform: uppercase; }
+  .anomalia-item { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; gap: 10px; }
+  .anomalia-item:last-child { border-bottom: none; }
+  .anom-icon { font-size: 16px; flex-shrink: 0; margin-top: 2px; }
+  .anom-text strong { display: block; font-size: 13px; margin-bottom: 1px; }
+  .anom-text small  { color: var(--gray); font-size: 12px; }
+
+  /* ── Tabella ── */
+  .results-table { background: var(--surf); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .results-table table { width: 100%; border-collapse: collapse; }
+  .results-table th {
+    background: var(--surf2); padding: 9px 11px;
+    text-align: left; font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px; color: var(--gray); letter-spacing: 1px;
+    text-transform: uppercase; border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  .results-table td { padding: 9px 11px; border-bottom: 1px solid var(--border); font-size: 12px; vertical-align: middle; }
+  .results-table tr:last-child td { border-bottom: none; }
+  .results-table tr:hover td { background: var(--surf2); }
+  .row-err  td { background: rgba(244,67,54,.04); }
+  .row-warn td { background: rgba(244,200,66,.04); }
+
+  /* ── Badge ── */
+  .badge { display: inline-block; padding: 2px 7px; border-radius: 4px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; font-weight: 600; white-space: nowrap; }
+  .badge-ok   { background: rgba(76,175,125,.15); color: var(--green); }
+  .badge-warn { background: rgba(244,200,66,.15);  color: var(--yellow); }
+  .badge-err  { background: rgba(244,67,54,.15);   color: var(--red); }
+  .badge-miss { background: rgba(136,146,164,.15); color: var(--gray); }
+
+  /* ── Celle confronto ── */
+  .val-pair { display: flex; flex-direction: column; gap: 1px; }
+  .val-j { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--gray); }
+  .val-p { font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
+  .c-ok   { color: var(--green); }
+  .c-warn { color: var(--yellow); }
+  .c-err  { color: var(--red); font-weight: 600; }
+  .c-miss { color: var(--gray); font-style: italic; }
+
+  /* ── Legenda ── */
+  .legenda { margin-top: 14px; color: var(--gray); font-size: 11px; font-family: 'IBM Plex Mono', monospace; }
+
+  /* ── Status ── */
+  #status { display:none; background: var(--surf2); border: 1px solid var(--border); border-radius:6px; padding:9px 14px; margin-bottom:14px; font-family:'IBM Plex Mono',monospace; font-size:12px; color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">O.P.E.R.A.</div>
+  <div class="sep">|</div>
+  <div class="htitle">Controllo Conferme Ordine Fornitori</div>
+</header>
+
+<main>
+
+  <!-- Selezione fornitore -->
+  <div class="fornitore-bar">
+    <button class="btn-forn active" onclick="selFornitore('finstral', this)">Finstral</button>
+    <button class="btn-forn disabled" title="Da implementare">Palagina</button>
+    <button class="btn-forn disabled" title="Da implementare">Essepi</button>
+    <button class="btn-forn disabled" title="Da implementare">Erreci</button>
+    <button class="btn-forn disabled" title="Da implementare">FerreroLegno</button>
+    <button class="btn-forn disabled" title="Da implementare">Flessya</button>
+  </div>
+
+  <!-- Upload -->
+  <div class="upload-grid">
+    <div class="upload-card" id="card-json">
+      <input type="file" id="inp-json" accept=".json" onchange="onJsonUpload(event)">
+      <div class="upload-icon">📋</div>
+      <div style="font-weight:500">Progetto JSON (Rilievo)</div>
+      <div class="upload-sub">File dalla app rilievo</div>
+      <div class="upload-name" id="name-json"></div>
+    </div>
+    <div class="upload-card" id="card-pdf">
+      <input type="file" id="inp-pdf" accept=".pdf" onchange="onPdfUpload(event)">
+      <div class="upload-icon">📄</div>
+      <div id="pdf-label" style="font-weight:500">Conferma d'Ordine Finstral (PDF)</div>
+      <div class="upload-sub">Trascina o clicca</div>
+      <div class="upload-name" id="name-pdf"></div>
+    </div>
+  </div>
+
+  <button class="btn-check" id="btn-check" disabled onclick="avviaControllo()">
+    ▶ AVVIA CONTROLLO
+  </button>
+
+  <div id="status"></div>
+  <div id="output"></div>
+
+</main>
+
+<!-- PDF.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+</script>
+
+<!-- Moduli O.P.E.R.A. -->
+<script src="core/checker-core.js"></script>
+<script src="fornitori/finstral.js"></script>
+<script src="fornitori/palagina.js"></script>
+
+<script>
+// ── Stato applicazione ────────────────────────────────────────────────────────
+
+let _jsonData   = null;
+let _pdfText    = null;
+let _fornitore  = FINSTRAL_CHECKER; // default
+
+// ── Selezione fornitore ───────────────────────────────────────────────────────
+
+function selFornitore(nome, btn) {
+  if (btn.classList.contains('disabled')) return;
+  document.querySelectorAll('.btn-forn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  const map = { finstral: FINSTRAL_CHECKER, palagina: PALAGINA_CHECKER };
+  _fornitore = map[nome] || FINSTRAL_CHECKER;
+
+  document.getElementById('pdf-label').textContent =
+    `Conferma d'Ordine ${_fornitore.nome} (PDF)`;
+
+  // Reset
+  _pdfText = null;
+  document.getElementById('name-pdf').textContent = '';
+  document.getElementById('card-pdf').classList.remove('loaded');
+  document.getElementById('output').innerHTML = '';
+  checkReady();
+}
+
+// ── Upload ────────────────────────────────────────────────────────────────────
+
+async function onJsonUpload(e) {
+  const f = e.target.files[0];
+  if (!f) return;
+  document.getElementById('name-json').textContent = f.name;
+  document.getElementById('card-json').classList.add('loaded');
+  _jsonData = JSON.parse(await f.text());
+  checkReady();
+}
+
+async function onPdfUpload(e) {
+  const f = e.target.files[0];
+  if (!f) return;
+  document.getElementById('name-pdf').textContent = f.name;
+  document.getElementById('card-pdf').classList.add('loaded');
+  setStatus('⏳ Lettura PDF...');
+  _pdfText = await estraiTestoPDF(f);
+  setStatus('');
+  checkReady();
+}
+
+async function estraiTestoPDF(file) {
+  const ab  = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
+  let testo = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page    = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    testo += content.items.map(it => it.str).join(' ') + '\n';
+  }
+  return testo;
+}
+
+function checkReady() {
+  document.getElementById('btn-check').disabled = !(_jsonData && _pdfText);
+}
+
+// ── Avvia controllo ───────────────────────────────────────────────────────────
+
+async function avviaControllo() {
+  setStatus('⏳ Parsing PDF...');
+  await tick();
+
+  // 1. Parsing PDF (specifico per fornitore)
+  const elementiPDF = _fornitore.parsePDF(_pdfText);
+  const metadati    = _fornitore.parseMetadati(_pdfText);
+
+  setStatus(`✓ ${elementiPDF.length} elementi trovati nel PDF — confronto in corso...`);
+  await tick();
+
+  // 2. Parsing JSON progetto (comune)
+  const posizioniRaw = OPERA_CHECKER.parseProgetto(_jsonData);
+
+  // 3. Normalizzazione con mappature specifiche del fornitore
+  const posizioniJSON = _fornitore.preparaPosizioniJSON(posizioniRaw);
+
+  // 4. Abbinamento e confronto (logica comune)
+  const { risultati, pdfExtra } = OPERA_CHECKER.abbina(posizioniJSON, elementiPDF);
+
+  setStatus('');
+  renderOutput(risultati, pdfExtra, metadati);
+}
+
+function tick() { return new Promise(r => setTimeout(r, 50)); }
+
+// ── Render ────────────────────────────────────────────────────────────────────
+
+function badge(e) {
+  const m = { ok:'badge-ok', warn:'badge-warn', err:'badge-err', miss:'badge-miss' };
+  const l = { ok:'OK', warn:'ATTENZIONE', err:'ERRORE', miss:'MANCANTE' };
+  return `<span class="badge ${m[e]||'badge-miss'}">${l[e]||'?'}</span>`;
+}
+
+function cellCmp(vJ, vP, ok, sev) {
+  if (!vP) return `<span class="c-miss">${vJ||'—'}</span>`;
+  const cls = ok ? 'c-ok' : (sev==='err' ? 'c-err' : 'c-warn');
+  return `<div class="val-pair">
+    <span class="val-j" title="Rilievo">${vJ||'—'}</span>
+    <span class="val-p ${cls}" title="PDF ${_fornitore.nome}">${vP||'—'}</span>
+  </div>`;
+}
+
+function renderOutput(risultati, pdfExtra, metadati) {
+  const ok   = risultati.filter(r => r.result?.esito === 'ok').length;
+  const warn = risultati.filter(r => r.result?.esito === 'warn').length;
+  const err  = risultati.filter(r => r.result?.esito === 'err').length;
+  const miss = risultati.filter(r => r.match !== 'found').length + pdfExtra.length;
+
+  const tutteAnomalie = [];
+  for (const r of risultati) {
+    if (r.result?.anomalie?.length) {
+      r.result.anomalie.forEach(a =>
+        tutteAnomalie.push({ pos: r.json.nome, amb: r.json.ambiente, ...a }));
+    }
+  }
+
+  let html = '';
+
+  // Metadati ordine
+  if (Object.keys(metadati).length) {
+    html += `<div class="meta-bar">`;
+    const fields = [
+      ['Riferimento', metadati.riferimento],
+      ['Data', metadati.data],
+      ['Ordine', metadati.ordine],
+      ['Nr. Composer', metadati.nrComposer],
+      ['Settimana', metadati.settimana],
+      ['Pagamento', metadati.pagamento],
+      ['Totale', metadati.totaleOrdine ? `€ ${parseFloat(metadati.totaleOrdine).toLocaleString('it-IT', {minimumFractionDigits:2})}` : null],
+    ];
+    for (const [lbl, val] of fields) {
+      if (val) html += `<div class="meta-item"><label>${lbl}</label><span>${val}</span></div>`;
+    }
+    html += `</div>`;
+  }
+
+  // Summary
+  html += `<div class="summary-bar">
+    <div class="summary-card"><div class="summary-num num-green">${ok}</div><div class="summary-lbl">✅ Corrette</div></div>
+    <div class="summary-card"><div class="summary-num num-yellow">${warn}</div><div class="summary-lbl">⚠️ Attenzione</div></div>
+    <div class="summary-card"><div class="summary-num num-red">${err}</div><div class="summary-lbl">❌ Errori</div></div>
+    <div class="summary-card"><div class="summary-num num-gray">${miss}</div><div class="summary-lbl">❓ Non abbinati</div></div>
+  </div>`;
+
+  // Anomalie
+  if (tutteAnomalie.length) {
+    html += `<div class="anomalie-box">
+      <div class="sec-hdr">🚨 anomalie rilevate (${tutteAnomalie.length})</div>`;
+    for (const a of tutteAnomalie) {
+      const icon = a.sev === 'err' ? '❌' : '⚠️';
+      html += `<div class="anomalia-item">
+        <div class="anom-icon">${icon}</div>
+        <div class="anom-text">
+          <strong>${a.pos} — ${a.amb} — ${a.campo}</strong>
+          <small>Rilievo: <b>${a.json}</b> &nbsp;→&nbsp; PDF ${_fornitore.nome}: <b>${a.pdf}</b>${a.diff ? ` &nbsp;(${a.diff})` : ''}</small>
+        </div>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  // Tabella
+  const col = _fornitore.colonne;
+  html += `<div class="results-table">
+    <div class="sec-hdr">dettaglio posizioni — ${risultati.length} totali</div>
+    <table><thead><tr>
+      <th>Esito</th><th>Pos.</th><th>Ambiente</th>
+      <th>BRM L×H</th><th>Tipo</th><th>Lato</th>
+      <th>${col.telaio}</th><th>${col.anta}</th><th>${col.vetro}</th>
+      <th>${col.ferr}</th><th>${col.colInt}</th><th>${col.colEst}</th><th>${col.soglia}</th>
+    </tr></thead><tbody>`;
+
+  for (const r of risultati) {
+    const j   = r.json;
+    const p   = r.pdf;
+    const res = r.result;
+
+    if (r.match !== 'found') {
+      html += `<tr class="row-err">
+        <td>${badge('miss')}</td><td class="val-p">${j.nome}</td>
+        <td>${j.ambiente||'—'}</td>
+        <td colspan="9" class="c-miss">${j.hasDati ? `${j.brmL}×${j.brmH} — non trovato nel PDF` : 'Posizione non configurata'}</td>
+      </tr>`;
+      continue;
     }
 
-    // Misure (tolleranza ±2mm)
-    check('BRM-L',      jsonPos.brmL,       pdfEl.brmL,    'err', 2);
-    check('BRM-H',      jsonPos.brmH,       pdfEl.brmH,    'err', 2);
+    const d    = res.dettagli;
+    const rCls = res.esito === 'err' ? 'row-err' : res.esito === 'warn' ? 'row-warn' : '';
 
-    // Tipo apertura
-    check('Tipo',       jsonPos.tipo,        pdfEl.tipo,    'err');
+    const brmDL = Math.abs(j.brmL - p.brmL);
+    const brmDH = Math.abs(j.brmH - p.brmH);
+    const brmOk = brmDL <= 2 && brmDH <= 2;
+    const brmCls = brmOk ? 'c-ok' : (brmDL > 10 || brmDH > 10 ? 'c-err' : 'c-warn');
 
-    // Lato — solo se JSON lo ha salvato
-    if (jsonPos.lato && pdfEl.lato) {
-      check('Lato', jsonPos.lato, pdfEl.lato, 'err');
-    } else if (!jsonPos.lato && pdfEl.lato) {
-      anomalie.push({ campo: 'Lato', json: '(non salvato)', pdf: pdfEl.lato, sev: 'warn' });
-      dettagli['Lato'] = { json: '—', pdf: pdfEl.lato };
+    const latoJ = j.lato;
+    const latoOk = latoJ && p.lato && latoJ === p.lato;
+
+    // Soglia: solo PF, e la finestra NON ha soglia (telaio circolare)
+    let sogliaCella = '<span class="c-miss">—</span>';
+    if (j.isPF) {
+      sogliaCella = cellCmp('377K attesa', p.hasSoglia ? '377K ✓' : '— mancante', p.hasSoglia, 'warn');
     }
 
-    // Telaio
-    check('Telaio',     jsonPos.telaio_norm, pdfEl.telaio,  'err');
-
-    // Tipo anta
-    check('Anta',       jsonPos.anta_norm,   pdfEl.anta,    'warn');
-
-    // Vetro
-    check('Vetro',      jsonPos.vetro_norm,  pdfEl.vetro,   'err');
-
-    // Ferramenta
-    check('Ferramenta', jsonPos.ferr_norm,   pdfEl.ferr,    'warn');
-
-    // Colore esterno
-    check('Colore est.', jsonPos.coloreEst,  pdfEl.colEst,  'err');
-
-    // Soglia (solo PF)
-    // PF = porta finestra: soglia 377K sotto, telaio su 3 lati (non circolare)
-    if (jsonPos.isPF) {
-      dettagli['Soglia'] = { json: '377K (attesa)', pdf: pdfEl.hasSoglia ? '377K ✓' : '— non trovata' };
-      if (!pdfEl.hasSoglia) {
-        anomalie.push({ campo: 'Soglia 377K', json: 'attesa', pdf: 'non trovata', sev: 'warn' });
-      }
-    }
-
-    // Tipo telaio (circolare per F, 3 lati per PF)
-    // Solo informativo — non genera anomalia automatica ma registra
-    dettagli['Config telaio'] = {
-      json: jsonPos.isPF ? '3 lati + soglia' : 'circolare 4 lati',
-      pdf:  pdfEl.configTelaio || '—'
-    };
-
-    const esito = anomalie.length === 0 ? 'ok'
-      : anomalie.some(a => a.sev === 'err') ? 'err' : 'warn';
-
-    return { anomalie, dettagli, esito };
+    html += `<tr class="${rCls}">
+      <td>${badge(res.esito)}</td>
+      <td class="val-p">${j.nome}</td>
+      <td>${j.ambiente}</td>
+      <td><div class="val-pair">
+        <span class="val-j">${j.brmL}×${j.brmH}</span>
+        <span class="val-p ${brmCls}">${p.brmL}×${p.brmH}</span>
+      </div></td>
+      <td>${cellCmp(j.tipo, p.tipo, j.tipo===p.tipo, 'err')}</td>
+      <td>${cellCmp(latoJ||'—', p.lato, latoOk, 'err')}</td>
+      <td>${cellCmp(j.telaio_norm, p.telaio, j.telaio_norm===p.telaio, 'err')}</td>
+      <td>${cellCmp(j.anta_norm, p.anta, p.anta?.includes(j.anta_norm), 'warn')}</td>
+      <td>${cellCmp(j.vetro_norm, p.vetro, j.vetro_norm===p.vetro, 'err')}</td>
+      <td>${cellCmp(j.ferr_norm, p.ferr, j.ferr_norm===p.ferr, 'warn')}</td>
+      <td>${cellCmp(j.coloreInt, p.colInt, j.coloreInt===p.colInt, 'warn')}</td>
+      <td>${cellCmp(j.coloreEst, p.colEst, j.coloreEst===p.colEst, 'err')}</td>
+      <td>${sogliaCella}</td>
+    </tr>`;
   }
 
-  // ── Abbinamento JSON ↔ PDF ─────────────────────────────────────────────────
-  // Abbina le posizioni JSON agli elementi PDF per ambiente + tipo
-
-  function abbina(posizioniJSON, elementiPDF) {
-    const risultati = [];
-    const pdfUsati = new Set();
-
-    for (const pos of posizioniJSON) {
-      if (!pos.hasDati) {
-        risultati.push({ json: pos, pdf: null, match: 'missing', result: null });
-        continue;
-      }
-
-      const ambNorm = normAmbiente(pos.ambiente);
-      const candidati = elementiPDF.filter((el, i) => {
-        if (pdfUsati.has(i)) return false;
-        const aN = normAmbiente(el.ambiente);
-        return aN === ambNorm || aN.startsWith(ambNorm) || ambNorm.startsWith(aN);
-      });
-
-      let best = null, bestIdx = -1;
-
-      if (candidati.length === 1) {
-        best = candidati[0];
-        bestIdx = elementiPDF.indexOf(best);
-      } else if (candidati.length > 1) {
-        // Stesso tipo prima, poi più vicino per BRM
-        const sameTipo = candidati.filter(c => c.tipo === pos.tipo);
-        const pool = sameTipo.length > 0 ? sameTipo : candidati;
-        pool.sort((a, b) => {
-          const da = Math.abs(a.brmL - pos.brmL) + Math.abs(a.brmH - pos.brmH);
-          const db = Math.abs(b.brmL - pos.brmL) + Math.abs(b.brmH - pos.brmH);
-          return da - db;
-        });
-        best = pool[0];
-        bestIdx = elementiPDF.indexOf(best);
-      }
-
-      if (best) {
-        pdfUsati.add(bestIdx);
-        const result = confronta(pos, best);
-        risultati.push({ json: pos, pdf: best, match: 'found', result });
-      } else {
-        risultati.push({ json: pos, pdf: null, match: 'notfound', result: null });
-      }
-    }
-
-    const pdfExtra = elementiPDF.filter((_, i) => !pdfUsati.has(i));
-    return { risultati, pdfExtra };
+  // PDF non abbinati
+  for (const el of pdfExtra) {
+    html += `<tr class="row-warn">
+      <td>${badge('miss')}</td>
+      <td class="val-p">PDF #${el.posNum}</td>
+      <td>${el.ambiente}</td>
+      <td class="val-p">${el.brmL}×${el.brmH}</td>
+      <td>${el.tipo}</td>
+      <td>${el.lato}</td>
+      <td colspan="6" class="c-warn">Presente nel PDF ma non nel JSON rilievo</td>
+    </tr>`;
   }
 
-  // ── Utility ─────────────────────────────────────────────────────────────────
+  html += `</tbody></table></div>
+  <div class="legenda">riga grigia = valore rilievo &nbsp;|&nbsp; riga colorata = valore PDF ${_fornitore.nome} &nbsp;|&nbsp; tolleranza misure ±2mm</div>`;
 
-  function normAmbiente(s) {
-    return (s || '').toUpperCase().replace(/\d+$/, '').trim();
-  }
+  document.getElementById('output').innerHTML = html;
+}
 
-  // ── API pubblica ─────────────────────────────────────────────────────────────
+function setStatus(msg) {
+  const el = document.getElementById('status');
+  el.style.display = msg ? 'block' : 'none';
+  el.textContent = msg;
+}
+</script>
 
-  return {
-    parseProgetto,
-    confronta,
-    abbina,
-    normLato,
-    normAmbiente,
-  };
-
-})();
+</body>
+</html>
