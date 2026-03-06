@@ -1,5 +1,5 @@
 /**
- * O.P.E.R.A. — Checker Core v1.0
+ *  O.P.E.R.A. — Checker Core v1.0
  * Logica di confronto comune a tutti i fornitori.
  * Non contiene nulla di specifico per Finstral, Palagina, ecc.
  */
