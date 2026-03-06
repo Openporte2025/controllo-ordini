@@ -142,35 +142,49 @@ const OPERA_CHECKER = (() => {
     const risultati = [];
     const pdfUsati = new Set();
 
+    // Rileva se il PDF usa "Pos. N" come ambiente (formato senza nomi stanza)
+    const pdfUsaNumPos = elementiPDF.length > 0 &&
+      elementiPDF.every(el => /^Pos\.\s*\d+$/i.test(el.ambiente));
+
     for (const pos of posizioniJSON) {
       if (!pos.hasDati) {
         risultati.push({ json: pos, pdf: null, match: 'missing', result: null });
         continue;
       }
 
-      const ambNorm = normAmbiente(pos.ambiente);
-      const candidati = elementiPDF.filter((el, i) => {
-        if (pdfUsati.has(i)) return false;
-        const aN = normAmbiente(el.ambiente);
-        return aN === ambNorm || aN.startsWith(ambNorm) || ambNorm.startsWith(aN);
-      });
-
       let best = null, bestIdx = -1;
 
-      if (candidati.length === 1) {
-        best = candidati[0];
-        bestIdx = elementiPDF.indexOf(best);
-      } else if (candidati.length > 1) {
-        // Stesso tipo prima, poi più vicino per BRM
-        const sameTipo = candidati.filter(c => c.tipo === pos.tipo);
-        const pool = sameTipo.length > 0 ? sameTipo : candidati;
-        pool.sort((a, b) => {
-          const da = Math.abs(a.brmL - pos.brmL) + Math.abs(a.brmH - pos.brmH);
-          const db = Math.abs(b.brmL - pos.brmL) + Math.abs(b.brmH - pos.brmH);
-          return da - db;
+      if (pdfUsaNumPos) {
+        // Abbinamento per numero posizione
+        const idx = elementiPDF.findIndex((el, i) =>
+          !pdfUsati.has(i) && el.posNum === pos.posNum
+        );
+        if (idx >= 0) { best = elementiPDF[idx]; bestIdx = idx; }
+      }
+
+      if (!best) {
+        // Abbinamento per nome ambiente
+        const ambNorm = normAmbiente(pos.ambiente);
+        const candidati = elementiPDF.filter((el, i) => {
+          if (pdfUsati.has(i)) return false;
+          const aN = normAmbiente(el.ambiente);
+          return aN === ambNorm || aN.startsWith(ambNorm) || ambNorm.startsWith(aN);
         });
-        best = pool[0];
-        bestIdx = elementiPDF.indexOf(best);
+
+        if (candidati.length === 1) {
+          best = candidati[0];
+          bestIdx = elementiPDF.indexOf(best);
+        } else if (candidati.length > 1) {
+          const sameTipo = candidati.filter(c => c.tipo === pos.tipo);
+          const pool = sameTipo.length > 0 ? sameTipo : candidati;
+          pool.sort((a, b) => {
+            const da = Math.abs(a.brmL - pos.brmL) + Math.abs(a.brmH - pos.brmH);
+            const db = Math.abs(b.brmL - pos.brmL) + Math.abs(b.brmH - pos.brmH);
+            return da - db;
+          });
+          best = pool[0];
+          bestIdx = elementiPDF.indexOf(best);
+        }
       }
 
       if (best) {
