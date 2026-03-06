@@ -1,5 +1,5 @@
 /**
- * O.P.E.R.A. — Finstral Checker v1.1
+ *  O.P.E.R.A. — Finstral Checker v1.1
  * Parser PDF e mappature specifiche per conferme d'ordine Finstral.
  *
  * Formato PDF Finstral:
