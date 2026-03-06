@@ -47,6 +47,8 @@ const OPERA_CHECKER = (() => {
         coloreManiglia: inf.coloreManiglia || '',
         tagli:         inf.codTagliValues || [],
         codModello:    inf.codiceModello || '',
+        // Numero ante dal codice modello: 1xx = 1 anta, 2xx/4xx = 2 ante, 3xx/6xx = PF
+        nAnte:         calcNAnte(inf.codiceModello),
         // PF = porta finestra → ha soglia sotto, 3 lati telaio (dx/alto/sx)
         // F  = finestra       → telaio circolare 4 lati uguali
         isPF:          tipoApertura === 'PF',
@@ -57,6 +59,18 @@ const OPERA_CHECKER = (() => {
 
   function normLato(s) {
     return LATO_MAP[String(s)] || s || '';
+  }
+
+  // Calcola numero ante dal codice modello Finstral
+  // 1xx = 1 anta, 2xx/4xx = 2 ante, 3xx = 3 ante, 6xx = PF 1 anta, ecc.
+  function calcNAnte(codice) {
+    const n = parseInt(codice);
+    if (!n) return null;
+    const centinaia = Math.floor(n / 100);
+    if (centinaia === 1 || centinaia === 6) return 1;
+    if (centinaia === 2 || centinaia === 4) return 2;
+    if (centinaia === 3) return 3;
+    return null;
   }
 
   // ── Confronto generico ──────────────────────────────────────────────────────
@@ -85,6 +99,22 @@ const OPERA_CHECKER = (() => {
     // Misure (tolleranza ±2mm)
     check('BRM-L',      jsonPos.brmL,       pdfEl.brmL,    'err', 2);
     check('BRM-H',      jsonPos.brmH,       pdfEl.brmH,    'err', 2);
+
+    // Numero ante (dal codice modello JSON vs nAnte PDF)
+    if (jsonPos.nAnte && pdfEl.nAnte) {
+      dettagli['N. Ante'] = { json: jsonPos.nAnte, pdf: pdfEl.nAnte };
+      if (jsonPos.nAnte !== pdfEl.nAnte) {
+        anomalie.push({ campo: 'N. Ante', json: jsonPos.nAnte, pdf: pdfEl.nAnte, sev: 'err' });
+      }
+    }
+
+    // Tagli telaio
+    const tagliJ = (jsonPos.tagli || []).map(t => String(t)).sort().join(', ');
+    const tagliP = (pdfEl.tagli || []).map(t => String(t)).sort().join(', ');
+    dettagli['Tagli'] = { json: tagliJ || '—', pdf: tagliP || '—' };
+    if (tagliJ && tagliP && tagliJ !== tagliP) {
+      anomalie.push({ campo: 'Tagli telaio', json: tagliJ, pdf: tagliP, sev: 'warn' });
+    }
 
     // Tipo apertura
     check('Tipo',       jsonPos.tipo,        pdfEl.tipo,    'err');
