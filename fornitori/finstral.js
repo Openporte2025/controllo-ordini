@@ -21,11 +21,13 @@ const FINSTRAL_CHECKER = (() => {
 
   // ── Mappature Finstral → valori normalizzati ────────────────────────────────
 
-  // Codice telaio: rimuove suffisso numerico (965N5 → 965N)
+  // Codice telaio: normalizza rimuovendo suffisso numerico SOLO dopo lettera
+  // 965N5 → 965N  |  965 → 965  |  Top72 → Top72
   function normTelaio(s) {
     if (!s) return '';
-    const code = s.split(/[\s-]/)[0].replace(/\d$/, '');
-    return code; // es. "965N", "Top72", "Top80"
+    const code = s.split(/[\s-]/)[0];
+    // Rimuove digit finale solo se c'è una lettera prima (es. 965N5 → 965N)
+    return code.replace(/([A-Za-z])\d$/, '$1');
   }
 
   // Vetro JSON → codice Finstral
@@ -47,6 +49,7 @@ const FINSTRAL_CHECKER = (() => {
   // Tipo anta JSON → codice Finstral
   const ANTA_MAP = {
     'slim-line': '970K',
+    'step-line': '974',
     'standard':  '971K',
   };
   function normAntaJSON(s) {
@@ -72,55 +75,103 @@ const FINSTRAL_CHECKER = (() => {
   }
 
   // ── Parser PDF Finstral ─────────────────────────────────────────────────────
+  //
+  // Formato A (con ambiente): "Pos  AMBIENTE  101 finestra  N  BRM-L  BRM-H"
+  //   es. "1 CUCINA 101 finestra 1 790 2125"
+  //
+  // Formato B (senza ambiente): "Pos  Pos.cl.  Tipo  Pezzi  BRM-L  BRM-H"
+  //   es. "1  1  101 finestra  1  1025  1260"
+  //
+  // Codici tipo:
+  //   101 = finestra anta singola  → F
+  //   201 = finestra a 2 ante      → F
+  //   401 = finestra a 2 ante      → F
+  //   601 = porta finestra         → PF
+  //   altri con "porta"            → PF
 
   function parsePDF(testo) {
     const elementi = [];
 
-    // Pattern principale: trova ogni posizione
-    // Formato: N  AMBIENTE  101 (finestra|porta|portafinestra)  N  NNNNN  NNNNN
-    const rePos = /\b(\d+)\s+(CUCINA|SOGGIORNO|CAMERA|CAMERETTA|BAGNO\d?|BAGNO|INGRESSO|STUDIO|SALA|CORRIDOIO|GARAGE|CANTINA|TAVERNA|TINELLO|PRANZO|NOTTE)\s+(101\s+(?:finestra|porta(?:finestra)?))\s+(\d+)\s+(\d{3,4})\s+(\d{3,4})/gi;
+    const ambienti = 'CUCINA|SOGGIORNO|CAMERA|CAMERETTA|BAGNO\\d?|BAGNO|INGRESSO|STUDIO|SALA|CORRIDOIO|GARAGE|CANTINA|TAVERNA|TINELLO|PRANZO|NOTTE';
 
-    // Raccolgo prima tutti i match con le loro posizioni
-    const allMatches = [];
+    // Pattern A: ha nome ambiente
+    const rePosA = new RegExp(
+      `\\b(\\d+)\\s+(${ambienti})\\s+(\\d{3}\\s+(?:finestra|portafinestra|porta))\\s+(\\d+)\\s+(\\d{3,4})\\s+(\\d{3,4})`,
+      'gi'
+    );
+
+    // Pattern B: ha numero pos. cliente (due numeri prima del tipo)
+    // "1  1  101 finestra  1  1025  1260"
+    const rePosB = /\b(\d+)\s+(\d+)\s+(\d{3}\s+(?:finestra|portafinestra|porta))\s+(\d+)\s+(\d{3,4})\s+(\d{3,4})/gi;
+
+    // Provo prima formato A, poi B se non trova nulla
+    let allMatches = [];
+
     let m;
-    while ((m = rePos.exec(testo)) !== null) {
-      allMatches.push({ m, index: m.index });
+    while ((m = rePosA.exec(testo)) !== null) {
+      allMatches.push({
+        index:    m.index,
+        posNum:   parseInt(m[1]),
+        ambiente: m[2].trim(),
+        tipoStr:  m[3].trim().toLowerCase(),
+        pezzi:    parseInt(m[4]),
+        brmL:     parseInt(m[5]),
+        brmH:     parseInt(m[6]),
+      });
+    }
+
+    if (allMatches.length === 0) {
+      // Formato B: usa numero posizione cliente come ambiente
+      while ((m = rePosB.exec(testo)) !== null) {
+        allMatches.push({
+          index:    m.index,
+          posNum:   parseInt(m[1]),
+          ambiente: `Pos. ${m[2]}`,   // es. "Pos. 1"
+          tipoStr:  m[3].trim().toLowerCase(),
+          pezzi:    parseInt(m[4]),
+          brmL:     parseInt(m[5]),
+          brmH:     parseInt(m[6]),
+        });
+      }
     }
 
     for (let mi = 0; mi < allMatches.length; mi++) {
-      m = allMatches[mi].m;
+      const { posNum, ambiente, tipoStr, pezzi, brmL, brmH, index } = allMatches[mi];
 
-      const posNum  = parseInt(m[1]);
-      const ambiente = m[2].trim();
-      const tipoStr  = m[3].trim().toLowerCase();
-      const pezzi    = parseInt(m[4]);
-      const brmL     = parseInt(m[5]);
-      const brmH     = parseInt(m[6]);
+      // Tipo: porta/portafinestra → PF, altrimenti F
+      // Anche codice 6xx → PF
+      const codTipo = parseInt(tipoStr.split(/\s/)[0]);
+      const tipo = (tipoStr.includes('porta') || codTipo >= 600) ? 'PF' : 'F';
 
-      // F = finestra (telaio circolare), PF = porta (3 lati + soglia sotto)
-      const tipo = tipoStr.includes('porta') ? 'PF' : 'F';
+      // Numero ante (101=1, 201/401=2, ecc.) — informativo
+      const nAnte = codTipo >= 400 ? 2 : codTipo >= 200 ? 2 : 1;
 
-      // Chunk limitato esattamente al prossimo match della stessa regex
-      // → evita che i dati della posizione successiva inquinino quella corrente
-      const chunkStart = allMatches[mi].index;
+      // Chunk limitato al prossimo match
+      const chunkStart = index;
       const chunkEnd   = mi + 1 < allMatches.length
         ? allMatches[mi + 1].index
         : testo.length;
       const chunk = testo.slice(chunkStart, chunkEnd);
 
-      // Lato apertura (Din 1 / Din 2)
+      // Lato apertura (Din 1 / Din 2) — prendo l'ultimo nel chunk (anta principale)
       let lato = '';
-      const mLato = /Din\s*([12])/i.exec(chunk);
-      if (mLato) lato = 'Din ' + mLato[1];
+      const reLato = /Din\s*([12])/gi;
+      let mLato;
+      while ((mLato = reLato.exec(chunk)) !== null) lato = 'Din ' + mLato[1];
 
-      // Telaio (965N, Top72, ecc.)
+      // Telaio (965, 965N, Top72, ecc.) — cerco il codice numerico nella sezione "Dati telaio"
       let telaio = '';
-      const mTelaio = /(965N|Top\s*72|Top\s*80|Finstral\s*74)/i.exec(chunk);
+      const mTelaio = /\b(965N?|Top\s*72|Top\s*80|Finstral\s*74)\b/i.exec(chunk);
       if (mTelaio) telaio = mTelaio[1].replace(/\s+/, '');
+      else {
+        // fallback: cerca codice numerico telaio "965 telaio"
+        const mT2 = /\b(9\d{2})\s+telaio/i.exec(chunk);
+        if (mT2) telaio = mT2[1];
+      }
 
       // Tipo anta
       let anta = '';
-      const mAnta = /(970K|971K|972K)/i.exec(chunk);
+      const mAnta = /(970K|971K|972K|974)\b/i.exec(chunk);
       if (mAnta) anta = mAnta[1].toUpperCase();
 
       // Vetro (codice numerico Finstral)
