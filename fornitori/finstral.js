@@ -1,5 +1,5 @@
 /**
- *  O.P.E.R.A. — Finstral Checker v1.1
+ * O.P.E.R.A. — Finstral Checker v1.1
  * Parser PDF e mappature specifiche per conferme d'ordine Finstral.
  *
  * Formato PDF Finstral:
@@ -205,8 +205,23 @@ const FINSTRAL_CHECKER = (() => {
       }
 
       // Soglia 377K — presente solo nelle PF, sul lato BASSO
-      // La finestra (F) ha telaio circolare, NON ha soglia
       const hasSoglia = /377K/.test(chunk);
+
+      // Numero ante dal codice tipo (101=1, 401=2, ecc.)
+      const nAnte = (codTipo >= 400 && codTipo < 500) ? 2
+                  : (codTipo >= 200 && codTipo < 300) ? 2
+                  : (codTipo >= 300 && codTipo < 400) ? 3
+                  : 1;
+
+      // Tagli telaio — cerco tutti i codici "128 taglio..." o "28 nodo..."
+      // Nel PDF appaiono come "128 taglio 128" oppure "28 nodo centrale..."
+      const tagli = [];
+      const reTagli = /\b(128|28|129)\s+(?:taglio|nodo)/gi;
+      let mTaglio;
+      while ((mTaglio = reTagli.exec(chunk)) !== null) {
+        const t = mTaglio[1];
+        if (!tagli.includes(t)) tagli.push(t);
+      }
 
       // Config telaio (descrittiva)
       const configTelaio = tipo === 'PF'
@@ -218,6 +233,7 @@ const FINSTRAL_CHECKER = (() => {
         brmL, brmH,
         lato, telaio, anta, vetro, ferr,
         colEst, colInt,
+        nAnte, tagli,
         hasSoglia, configTelaio,
       });
     }
@@ -264,6 +280,8 @@ const FINSTRAL_CHECKER = (() => {
       anta:       'Tipo anta',
       vetro:      'Vetro',
       ferr:       'Ferramenta',
+      nAnte:      'N. Ante',
+      tagli:      'Tagli telaio',
       colInt:     'Colore int.',
       colEst:     'Colore est.',
       soglia:     'Soglia',
